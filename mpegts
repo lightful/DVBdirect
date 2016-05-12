@@ -1,0 +1,199 @@
+#!/usr/bin/python
+# required python 3
+# pep8 --ignore=E501,E701
+#
+# mpegts v1.0 - Copyright (C) 2016 Ciriaco Garcia de Celis
+# Utility to handle multiplexed MPEG-TS files captured from raw DVB sources
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+import os
+import stat
+import sys
+import subprocess
+import re
+from collections import OrderedDict, defaultdict
+from itertools import chain
+
+inputMode = os.fstat(sys.stdin.fileno()).st_mode
+redirected = stat.S_ISFIFO(inputMode) or stat.S_ISREG(inputMode)  # only for probing
+channelArgv = 1 if redirected else 2
+
+if len(sys.argv) < channelArgv:
+    print('\n'
+          '  mpegts v1.0 - Copyright (C) 2016 Ciriaco Garcia de Celis\n'
+          '  Utility to handle multiplexed MPEG-TS files captured from raw DVB sources\n\n'
+          '    ' + os.path.basename(sys.argv[0]) + ' file.mts [channel [operation ...]]\n\n'
+          '      channel (omit to list all channels):\n'
+          '          "channel_name" or channel_ID\n\n'
+          '      operation (omit to show the streams in the selected channel):\n'
+          '          play                 [start [end]] (reproduce the channel)\n'
+          '          save     output.ts   [start [end]] (extract channel; omits teletext)\n'
+          '          compress output.mkv  [start [end]] (HQ vp9 encoding; with subtitles)\n'
+          '          compress output.webm [start [end]] (HQ vp9 encoding; omits subtitles)\n\n'
+          '      Note: optional <start> and <end> times (absolute, not from 0) in seconds\n')
+    exit(1)
+
+proc = subprocess.Popen(['ffprobe',
+                         '-v', 'quiet',
+                         '-of', 'compact',
+                         '-show_programs',  # also reports streams (without subtitles lang if -show_streams isn't set)
+                         '-show_streams',  # this duplicates streams listing when -show_programs is set
+                         '-' if redirected else 'file:' + sys.argv[1]],
+                        stdout=subprocess.PIPE)
+
+channels = {}
+channelStreams = defaultdict(list)
+streams = {}
+lastChannelName = None
+nb_streams = 0
+
+while True:
+    input = proc.stdout.readline()
+    if not input: break
+    line = re.sub('\\x05|\\n', '', input.decode("utf-8"))
+    if len(line) < 1:
+        nb_streams = 0  # ffprobe bug in programs lookup with some files
+        continue
+    data = dict([(x.split('=') + [None])[:2] for x in line.split('|')])
+    if 'program_id' in data:
+        if nb_streams == 0:
+            nb_streams = int(data['nb_streams'])
+        if 'tag:service_name' in data:
+            lastChannelName = data['tag:service_name']
+            channels[lastChannelName] = data
+    elif nb_streams > 0:
+        nb_streams -= 1
+        channelStreams[lastChannelName].append(data['index'])
+    else:
+        streams[data['index']] = data
+
+proc.wait()
+if proc.returncode != 0:
+    print('error reading', 'stdin' if redirected else sys.argv[1])
+    exit(proc.returncode)
+
+channelName = sys.argv[channelArgv] if len(sys.argv) > channelArgv and channels else None
+
+if channels and not channelName:
+    longestChannel = max(len(x) for x in channels)
+    sortedChannels = OrderedDict(sorted(channels.items(), key=lambda i: i[0].casefold()))
+    for channelName, channel in sortedChannels.items():
+        nameTellsProvider = re.match(channel['tag:service_provider'], channelName, re.IGNORECASE)
+        print('ID {0:>4} ({1:>2} streams) {2:{3}}{4}'.format(
+              channel['program_id'],
+              channel['nb_streams'],
+              channelName, longestChannel,
+              '' if nameTellsProvider else ' (%s)' % channel['tag:service_provider']
+              ))
+    exit(0)
+
+if channelName and channelName.isnumeric():
+    channelName = dict(((prop['program_id'], name) for name, prop in channels.items())).get(channelName, channelName)
+
+videoPids = []
+audioPids = []
+audioStartTime = 0
+subtitlePids = []
+
+showStreams = not len(sys.argv) > 3 or redirected
+
+if channelName and channelName not in channelStreams:
+    print('channel "%s" not found' % channelName)
+    exit(1)
+else:
+    if channelName and showStreams: print(channelName)
+    for streamId in (channelStreams[channelName] if channelName else streams.keys()):
+        stream = streams[streamId]
+        if 'codec_type' not in stream: continue
+        isUnknown = stream['codec_type'] == 'unknown'
+        isAudio = stream['codec_type'] == 'audio'
+        isImpaired = 'disposition:visual_impaired' in stream and stream['disposition:visual_impaired'] == '1'
+        if isUnknown or (isAudio and isImpaired): continue
+        pid = None if 'id' not in stream or stream['id'] == 'N/A' else stream['id']
+        if showStreams:
+            print(stream['codec_type'],
+                  stream['index'] if not pid else 'PID=%s' % pid,
+                  stream['codec_name'],
+                  '', end='')
+        if stream['codec_type'] == 'video':
+            if pid: videoPids.append(pid)
+            if showStreams:
+                print(stream['width'] + 'x' + stream['height'],
+                      '' if 'display_aspect_ratio' not in stream else stream['display_aspect_ratio'])
+        elif isAudio:
+            if pid: audioPids.append(pid)
+            if 'start_time' in stream and audioStartTime == 0: audioStartTime = float(stream['start_time'])
+            if showStreams:
+                print('' if 'tag:language' not in stream else '(%s)' % stream['tag:language'],
+                      '' if 'channel_layout' not in stream else stream['channel_layout'],
+                      '' if 'channels' not in stream else stream['channels'],
+                      '' if 'bit_rate' not in stream else stream['bit_rate'])
+        elif stream['codec_type'] == 'subtitle':
+            if pid and stream['codec_name'] == 'dvbsub': subtitlePids.append(pid)
+            if showStreams:
+                print('' if 'tag:language' not in stream else '(%s)' % stream['tag:language'])
+
+if showStreams:
+    exit(0)
+elif len(videoPids) < 1 and len(audioPids) < 1:
+    print('no video or audio PIDs found in the file')
+    exit(1)
+
+isPlay = sys.argv[3] == 'play'
+isSave = sys.argv[3] == 'save'
+isCompress = sys.argv[3] == 'compress'
+
+if isPlay:
+    cmd = ['ffplay', '-f', 'mpegts']
+    cmd.extend([] if len(sys.argv) < 5 else ['-ss', str(float(sys.argv[4]) - audioStartTime)])
+    cmd.extend([] if len(sys.argv) < 6 else ['-t', str(float(sys.argv[5]) - float(sys.argv[4]))])
+    cmd.extend(['-vst', 'i:' + videoPids[0]] if len(videoPids) > 0 else ['-vn', '-nodisp'])
+    cmd.extend(['-ast', 'i:' + audioPids[0]] if len(audioPids) > 0 else ['-an'])
+    cmd.extend(['-sn', 'file:' + sys.argv[1]])
+elif (isSave or isCompress):
+    if len(sys.argv) < 5:
+        print('missing output file argument')
+        exit(1)
+    output, ext = os.path.splitext(sys.argv[4])
+    if ext == '.webm': subtitlePids = []
+    if isCompress and ext != '.mkv' and ext != '.webm': ext = None
+    if not ext: ext = '.mkv' if len(subtitlePids) > 0 else '.webm'
+    cmd = ['ffmpeg']
+    cmd.extend([] if len(sys.argv) < 6 else ['-ss', str(float(sys.argv[5]) - audioStartTime)])
+    cmd.extend(['-i', 'file:' + sys.argv[1]])
+    cmd.extend([] if len(sys.argv) < 7 else ['-t', str(float(sys.argv[6]) - float(sys.argv[5]))])
+    for pid in chain(videoPids, audioPids, subtitlePids):
+        cmd.append('-map')
+        cmd.append('i:' + pid)
+    if isSave:
+        cmd.extend(['-c', 'copy'])
+    else:
+        cmd.extend(['-threads', str(2 if sys.version_info < (3, 4) else os.cpu_count())])
+        cmd.extend(['-c:v', 'libvpx-vp9',  # perceptually betters h265 at high compression
+                    '-crf', '32', '-b:v', '2.5M',  # very high (but constrained) quality
+                    '-g', '300'])  # proper seek in some players
+        cmd.extend(['-c:a', 'libopus',  # webm requirement and much better than mp3
+                    '-b:a', '96k',
+                    '-c:s', 'copy'])
+        os.nice(19)
+    cmd.append(output + ext)
+else:
+    print('unknown operation "%s"' % sys.argv[3])
+    exit(1)
+
+try:
+    os.execvp(cmd[0], cmd)
+except Exception as e:
+    print(cmd[0] + ':', str(e))
