@@ -34,7 +34,7 @@ if len(sys.argv) < channelArgv:
     print('\n'
           '  mpegts v1.0 - Copyright (C) 2016 Ciriaco Garcia de Celis\n'
           '  Utility to handle multiplexed MPEG-TS files captured from raw DVB sources\n\n'
-          '    ' + os.path.basename(sys.argv[0]) + ' file.mts [channel [operation ...]]\n\n'
+          '    ' + os.path.basename(sys.argv[0]) + ' input.mts [channel [operation ...]]\n\n'
           '      channel (omit to list all channels):\n'
           '          "channel_name" or channel_ID\n\n'
           '      operation (omit to show the streams in the selected channel):\n'
@@ -151,30 +151,32 @@ elif len(videoPids) < 1 and len(audioPids) < 1:
     print('no video or audio PIDs found in the file')
     exit(1)
 
+
+def seek(argc, opt, lg=None):
+    return [] if len(sys.argv) < argc + 1 else \
+           [opt, str(float(sys.argv[argc]) - (lg if lg else float(sys.argv[argc - 1])))]
+
 isPlay = sys.argv[3] == 'play'
 isSave = sys.argv[3] == 'save'
 isCompress = sys.argv[3] == 'compress'
 
 if isPlay:
     cmd = ['ffplay', '-f', 'mpegts']
-    cmd.extend([] if len(sys.argv) < 5 else ['-ss', str(float(sys.argv[4]) - audioStartTime)])
-    cmd.extend([] if len(sys.argv) < 6 else ['-t', str(float(sys.argv[5]) - float(sys.argv[4]))])
+    cmd.extend(seek(4, '-ss', audioStartTime))
+    cmd.extend(seek(5, '-t'))
     cmd.extend(['-vst', 'i:' + videoPids[0]] if len(videoPids) > 0 else ['-vn', '-nodisp'])
     cmd.extend(['-ast', 'i:' + audioPids[0]] if len(audioPids) > 0 else ['-an'])
     cmd.extend(['-sn', 'file:' + sys.argv[1]])
 elif (isSave or isCompress):
+    cmd = ['ffmpeg']
+    cmd.extend(['-i', 'file:' + sys.argv[1]])
+    cmd.extend(seek(5, '-ss', audioStartTime))
+    cmd.extend(seek(6, '-t'))
     if len(sys.argv) < 5:
         print('missing output file argument')
         exit(1)
     output, ext = os.path.splitext(sys.argv[4])
-    if ext == '.webm': subtitlePids = []
-    if isCompress and ext != '.mkv' and ext != '.webm': ext = None
-    if not ext: ext = '.mkv' if len(subtitlePids) > 0 else '.webm'
-    cmd = ['ffmpeg']
-    cmd.extend([] if len(sys.argv) < 6 else ['-ss', str(float(sys.argv[5]) - audioStartTime)])
-    cmd.extend(['-i', 'file:' + sys.argv[1]])
-    cmd.extend([] if len(sys.argv) < 7 else ['-t', str(float(sys.argv[6]) - float(sys.argv[5]))])
-    for pid in chain(videoPids, audioPids, subtitlePids):
+    for pid in chain(videoPids, audioPids, [] if ext == '.webm' else subtitlePids):
         cmd.append('-map')
         cmd.append('i:' + pid)
     if isSave:
@@ -188,7 +190,12 @@ elif (isSave or isCompress):
                     '-b:a', '96k',
                     '-c:s', 'copy'])
         os.nice(19)
-    cmd.append(output + ext)
+    if output == '-':
+        cmd.extend(['-f', 'mpegts', '-'])
+    else:
+        if isCompress and ext != '.mkv' and ext != '.webm': ext = None
+        if not ext: ext = '.mkv' if len(subtitlePids) > 0 else '.webm'
+        cmd.append(output + ext)
 else:
     print('unknown operation "%s"' % sys.argv[3])
     exit(1)
