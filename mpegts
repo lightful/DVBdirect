@@ -23,6 +23,7 @@ import stat
 import sys
 import subprocess
 import re
+from datetime import timedelta
 from collections import OrderedDict, defaultdict
 from itertools import chain
 
@@ -50,6 +51,7 @@ proc = subprocess.Popen(['ffprobe',
                          '-of', 'compact',
                          '-show_programs',  # also reports streams (without subtitles lang if -show_streams isn't set)
                          '-show_streams',  # this duplicates streams listing when -show_programs is set
+                         '-show_entries', 'format',  # for duration (when not available per stream)
                          '-' if redirected else 'file:' + sys.argv[1]],
                         stdout=subprocess.PIPE)
 
@@ -58,6 +60,7 @@ channelStreams = defaultdict(list)
 streams = {}
 lastChannelName = None
 nb_streams = 0
+fileDuration = None
 
 while True:
     input = proc.stdout.readline()
@@ -67,7 +70,9 @@ while True:
         nb_streams = 0  # ffprobe bug in programs lookup with some files
         continue
     data = dict([(x.split('=') + [None])[:2] for x in line.split('|')])
-    if 'program_id' in data:
+    if 'format' in data:
+        if 'duration' in data: fileDuration = data['duration']
+    elif 'program_id' in data:
         if nb_streams == 0:
             nb_streams = int(data['nb_streams'])
         if 'tag:service_name' in data:
@@ -76,7 +81,7 @@ while True:
     elif nb_streams > 0:
         nb_streams -= 1
         channelStreams[lastChannelName].append(data['index'])
-    else:
+    elif 'index' in data:
         streams[data['index']] = data
 
 proc.wait()
@@ -118,16 +123,22 @@ else:
         stream = streams[streamId]
         if 'codec_type' not in stream: continue
         isUnknown = stream['codec_type'] == 'unknown'
+        isVideo = stream['codec_type'] == 'video'
         isAudio = stream['codec_type'] == 'audio'
         isImpaired = 'disposition:visual_impaired' in stream and stream['disposition:visual_impaired'] == '1'
         if isUnknown or (isAudio and isImpaired): continue
         pid = None if 'id' not in stream or stream['id'] == 'N/A' else stream['id']
         if showStreams:
-            print(stream['codec_type'],
-                  stream['index'] if not pid else 'PID=%s' % pid,
-                  stream['codec_name'],
-                  '', end='')
-        if stream['codec_type'] == 'video':
+            duration = stream['duration'] if 'duration' in stream and stream['duration'] != 'N/A' else None
+            if not duration and (isVideo or isAudio): duration = fileDuration
+            print("{0} {1}={2} {3:4} [{4}]".format(
+                stream['codec_type'],
+                'PID' if pid else 'IDX',
+                pid if pid else stream['index'],
+                stream['codec_name'],
+                "{:0>8}".format(str(timedelta(seconds=int(float(duration))))) if duration else 'N/A'),
+                end=' ')
+        if isVideo:
             if pid: videoPids.append(pid)
             if showStreams:
                 print(stream['width'] + 'x' + stream['height'],
@@ -200,7 +211,7 @@ else:
     print('unknown operation "%s"' % sys.argv[3])
     exit(1)
 
-try:
-    os.execvp(cmd[0], cmd)
-except Exception as e:
-    print(cmd[0] + ':', str(e))
+if subprocess.call(cmd) == 0:
+    if (isSave or isCompress) and output != '-':
+        finf = os.stat(sys.argv[1])
+        os.utime(output + ext, (finf.st_atime, finf.st_mtime))
