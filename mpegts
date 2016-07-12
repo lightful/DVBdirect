@@ -1,6 +1,6 @@
 #!/usr/bin/python
 # required python 3
-# pep8 --ignore=E501,E701
+# pep8 --ignore=E501
 #
 # mpegts v1.0 - Copyright (C) 2016 Ciriaco Garcia de Celis
 # Utility to handle multiplexed MPEG-TS files captured from raw DVB sources
@@ -45,7 +45,7 @@ if len(sys.argv) < varg:
           '          compress output.webm [start [end]] (HQ vp9 encoding; omits subtitles)\n\n'
           '      Notes: Optional <start> and <end> times (absolute, not from 0) in seconds\n'
           '             Input and/or output files must be omitted when redirection is used\n')
-    exit(1)
+    sys.exit(1)
 
 inFile = '-' if fromStdin else sys.argv[1]
 
@@ -67,14 +67,16 @@ fileDuration = None
 
 while True:
     input = proc.stdout.readline()
-    if not input: break
+    if not input:
+        break
     line = re.sub('\\x05|\\n', '', input.decode("utf-8"))
     if len(line) < 1:
         nb_streams = 0  # ffprobe bug in programs lookup with some files
         continue
     data = dict([(x.split('=') + [None])[:2] for x in line.split('|')])
     if 'format' in data:
-        if 'duration' in data: fileDuration = data['duration'] if data['duration'] != 'N/A' else None
+        if 'duration' in data:
+            fileDuration = data['duration'] if data['duration'] != 'N/A' else None
     elif 'program_id' in data:
         if nb_streams == 0:
             nb_streams = int(data['nb_streams'])
@@ -90,7 +92,7 @@ while True:
 proc.wait()
 if proc.returncode != 0:
     print('error reading', inFile)
-    exit(proc.returncode)
+    sys.exit(proc.returncode)
 
 channelName = sys.argv[varg] if len(sys.argv) > varg else None
 
@@ -106,7 +108,7 @@ if channels and not channelName:
               channelName, longestChannel,
               '' if nameTellsProvider else ' (%s)' % channel['tag:service_provider']
               ))
-    exit(0)
+    sys.exit(0)
 
 if channelName and channelName.isnumeric():
     channelName = dict(((prop['program_id'], prop['tag:service_name'])
@@ -121,21 +123,25 @@ showStreams = not len(sys.argv) > varg + 1
 
 if channelName and channelName.lower() not in channelStreams:
     print('channel "%s" not found' % channelName)
-    exit(1)
+    sys.exit(1)
 else:
-    if channelName and showStreams: print(channelName)
+    if channelName and showStreams:
+        print(channelName)
     for streamId in (channelStreams[channelName.lower()] if channelName else streams.keys()):
         stream = streams[streamId]
-        if 'codec_type' not in stream: continue
+        if 'codec_type' not in stream:
+            continue
         isUnknown = stream['codec_type'] == 'unknown'
         isVideo = stream['codec_type'] == 'video'
         isAudio = stream['codec_type'] == 'audio'
         isImpaired = 'disposition:visual_impaired' in stream and stream['disposition:visual_impaired'] == '1'
-        if isUnknown or (isAudio and isImpaired): continue
+        if isUnknown or (isAudio and isImpaired):
+            continue
         pid = None if 'id' not in stream or stream['id'] == 'N/A' else stream['id']
         if showStreams:
             duration = stream['duration'] if 'duration' in stream and stream['duration'] != 'N/A' else None
-            if not duration and (isVideo or isAudio): duration = fileDuration
+            if not duration and (isVideo or isAudio):
+                duration = fileDuration
             print("{0} {1}={2} {3:4} [{4}]".format(
                 stream['codec_type'],
                 'PID' if pid else 'IDX',
@@ -144,28 +150,32 @@ else:
                 "{:0>8}".format(str(timedelta(seconds=int(float(duration))))) if duration else 'N/A'),
                 end=' ')
         if isVideo:
-            if pid: videoPids.append(pid)
+            if pid:
+                videoPids.append(pid)
             if showStreams:
                 print(stream['width'] + 'x' + stream['height'],
                       '' if 'display_aspect_ratio' not in stream else stream['display_aspect_ratio'])
         elif isAudio:
-            if pid: audioPids.append(pid)
-            if 'start_time' in stream and audioStartTime == 0: audioStartTime = float(stream['start_time'])
+            if pid:
+                audioPids.append(pid)
+            if 'start_time' in stream and audioStartTime == 0:
+                audioStartTime = float(stream['start_time'])
             if showStreams:
                 print('' if 'tag:language' not in stream else '(%s)' % stream['tag:language'],
                       '' if 'channel_layout' not in stream else stream['channel_layout'],
                       '' if 'channels' not in stream else stream['channels'],
                       '' if 'bit_rate' not in stream else stream['bit_rate'])
         elif stream['codec_type'] == 'subtitle':
-            if pid and stream['codec_name'] == 'dvbsub': subtitlePids.append(pid)
+            if pid and stream['codec_name'] == 'dvbsub':
+                subtitlePids.append(pid)
             if showStreams:
                 print('' if 'tag:language' not in stream else '(%s)' % stream['tag:language'])
 
 if showStreams:
-    exit(0)
+    sys.exit(0)
 elif len(videoPids) < 1 and len(audioPids) < 1:
     print('no video or audio PIDs found in the file')
-    exit(1)
+    sys.exit(1)
 
 
 def seek(argc, opt, lg=None):
@@ -192,7 +202,7 @@ elif (isSave or isCompress):
     else:
         if len(sys.argv) < varg + 3:
             print('missing output file argument')
-            exit(1)
+            sys.exit(1)
         output, ext = os.path.splitext(sys.argv[varg + 2])
         varg += 1
     cmd = ['ffmpeg']
@@ -216,15 +226,21 @@ elif (isSave or isCompress):
     if toStdout:
         cmd.extend(['-f', 'mpegts' if isSave else 'matroska', '-'])
     else:
-        if fromStdin: cmd.append('-y')
-        if isCompress and ext != '.mkv' and ext != '.webm': ext = None
-        if not ext: ext = '.mkv' if len(subtitlePids) > 0 else '.webm'
+        if fromStdin:
+            cmd.append('-y')
+        if isCompress and ext != '.mkv' and ext != '.webm':
+            ext = '.mkv' if len(subtitlePids) > 0 else '.webm'
         cmd.append('file:' + output + ext)
 else:
     print('unknown operation "%s"' % operation)
-    exit(1)
+    sys.exit(1)
 
-if subprocess.call(cmd) == 0:
+retcode = subprocess.call(cmd)
+
+if retcode != 0:
+    sys.exit(retcode)
+else:
     if (isSave or isCompress) and not (fromStdin or toStdout):
         finf = os.stat(inFile)
         os.utime(output + ext, (finf.st_atime, finf.st_mtime))
+    sys.exit(0)
