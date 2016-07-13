@@ -94,7 +94,10 @@ if proc.returncode != 0:
     print('error reading', inFile)
     sys.exit(proc.returncode)
 
-channelName = sys.argv[varg] if len(sys.argv) > varg else None
+channelName = sys.argv[varg] if len(sys.argv) > varg and len(channelStreams) > 0 else None
+
+if len(channelStreams) == 0:
+    varg = varg - 1
 
 if channels and not channelName:
     longestChannel = max(len(x) for x in channels)
@@ -173,43 +176,45 @@ else:
 
 if showStreams:
     sys.exit(0)
-elif len(videoPids) < 1 and len(audioPids) < 1:
-    print('no video or audio PIDs found in the file')
-    sys.exit(1)
-
-
-def seek(argc, opt, lg=None):
-    return [] if len(sys.argv) < argc + 1 else \
-           [opt, str(float(sys.argv[argc]) - (lg if lg else float(sys.argv[argc - 1])))]
 
 operation = sys.argv[varg + 1].lower()
 isPlay = operation == 'play'
 isSave = operation == 'save'
 isCompress = operation == 'compress'
 
+
+def seek(argc, opt, lg=None):
+    return [] if len(sys.argv) < argc + 1 else \
+           [opt, str(float(sys.argv[argc]) - (lg if lg else float(sys.argv[argc - 1])))]
+
 if isPlay:
-    cmd = ['ffplay', '-f', 'mpegts']
+    cmd = ['ffplay']
+    if len(videoPids) > 0 or len(audioPids) > 0:
+        cmd.extend(['-vst', 'i:' + videoPids[0]] if len(videoPids) > 0 else ['-vn', '-nodisp'])
+        cmd.extend(['-ast', 'i:' + audioPids[0]] if len(audioPids) > 0 else ['-an'])
+    cmd.append('-sn')
     cmd.extend(seek(varg + 2, '-ss', audioStartTime))
     cmd.extend(seek(varg + 3, '-t'))
-    cmd.extend(['-vst', 'i:' + videoPids[0]] if len(videoPids) > 0 else ['-vn', '-nodisp'])
-    cmd.extend(['-ast', 'i:' + audioPids[0]] if len(audioPids) > 0 else ['-an'])
-    cmd.extend(['-sn', '-' if fromStdin else 'file:' + inFile])
+    cmd.append('-' if fromStdin else 'file:' + inFile)
 elif (isSave or isCompress):
-    outputMode = os.fstat(sys.stdout.fileno()).st_mode
-    toStdout = stat.S_ISFIFO(outputMode) or stat.S_ISREG(outputMode)
+    toStdout = len(sys.argv) < varg + 3
     if toStdout:
-        output, ext = ('-', '')
-    else:
-        if len(sys.argv) < varg + 3:
+        outputMode = os.fstat(sys.stdout.fileno()).st_mode
+        if not (stat.S_ISFIFO(outputMode) or stat.S_ISREG(outputMode)):  # if output not redirected
             print('missing output file argument')
             sys.exit(1)
+        output, ext = ('-', '')
+    else:
         output, ext = os.path.splitext(sys.argv[varg + 2])
+        ext = ext.lower()
+        if isCompress and ext != '.mkv' and ext != '.webm':
+            ext = '.mkv' if len(subtitlePids) > 0 else '.webm'
         varg += 1
     cmd = ['ffmpeg']
     cmd.extend(['-i', '-' if fromStdin else 'file:' + inFile])
     cmd.extend(seek(varg + 2, '-ss', audioStartTime))
     cmd.extend(seek(varg + 3, '-t'))
-    for pid in chain(videoPids, audioPids, [] if ext == '.webm' else subtitlePids):
+    for pid in chain(videoPids, audioPids, subtitlePids):
         cmd.append('-map')
         cmd.append('i:' + pid)
     if isSave:
@@ -219,17 +224,18 @@ elif (isSave or isCompress):
         cmd.extend(['-c:v', 'libvpx-vp9',  # perceptually betters h265 at high compression
                     '-crf', '32', '-b:v', '2.5M',  # very high (but constrained) quality
                     '-g', '300'])  # proper seek in some players
-        cmd.extend(['-c:a', 'libopus',  # webm requirement and much better than mp3
-                    '-b:a', '96k',
-                    '-c:s', 'copy'])
+        if ext == '.webm':
+            cmd.extend(['-c:a', 'libopus', '-b:a', '96k'])  # webm requirement and much better than mp3
+            cmd.extend(['-sn'])
+        else:
+            cmd.extend(['-c:a', 'copy'])
+            cmd.extend(['-c:s', 'copy'])
         os.nice(19)
     if toStdout:
         cmd.extend(['-f', 'mpegts' if isSave else 'matroska', '-'])
     else:
         if fromStdin:
             cmd.append('-y')
-        if isCompress and ext != '.mkv' and ext != '.webm':
-            ext = '.mkv' if len(subtitlePids) > 0 else '.webm'
         cmd.append('file:' + output + ext)
 else:
     print('unknown operation "%s"' % operation)
