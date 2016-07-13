@@ -1,10 +1,8 @@
-#!/usr/bin/python
-# required python 3
-# pep8 --ignore=E501
-#
-# mpegts v1.0 - Copyright (C) 2016 Ciriaco Garcia de Celis
-# Utility to handle multiplexed MPEG-TS files captured from raw DVB sources
-#
+#!/usr/bin/env python
+"""
+mpegts v1.2 - Copyright (C) 2016 Ciriaco Garcia de Celis
+Utility to handle multiplexed MPEG-TS files captured from raw DVB sources
+"""
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
@@ -23,6 +21,7 @@ import stat
 import sys
 import subprocess
 import re
+import textwrap
 from datetime import timedelta
 from collections import OrderedDict, defaultdict
 from itertools import chain
@@ -32,9 +31,7 @@ fromStdin = stat.S_ISFIFO(inputMode) or stat.S_ISREG(inputMode)
 varg = 1 if fromStdin else 2
 
 if len(sys.argv) < varg:
-    print('\n'
-          '  mpegts v1.1 - Copyright (C) 2016 Ciriaco Garcia de Celis\n'
-          '  Utility to handle multiplexed MPEG-TS files captured from raw DVB sources\n\n'
+    print(textwrap.indent(__doc__, '    ') + '\n'
           '    ' + os.path.basename(sys.argv[0]) + ' input.mts [channel [operation ...]]\n\n'
           '      channel (omit to list all channels):\n'
           '          "channel_name" or channel_ID\n\n'
