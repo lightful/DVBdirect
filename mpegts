@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-mpegts v1.2 - Copyright (C) 2016 Ciriaco Garcia de Celis
+mpegts v1.3 - Copyright (C) 2016 Ciriaco Garcia de Celis
 Utility to handle multiplexed MPEG-TS files captured from raw DVB sources
 """
 # This program is free software: you can redistribute it and/or modify
@@ -31,23 +31,26 @@ fromStdin = stat.S_ISFIFO(inputMode) or stat.S_ISREG(inputMode)
 varg = 1 if fromStdin else 2
 
 if len(sys.argv) < varg:
-    print(textwrap.indent(__doc__, '    ') + '\n'
+    print(textwrap.indent(__doc__, '  ') + '\n'
           '    ' + os.path.basename(sys.argv[0]) + ' input.mts [channel [operation ...]]\n\n'
           '      channel (omit to list all channels):\n'
           '          "channel_name" or channel_ID\n\n'
           '      operation (omit to show the streams in the selected channel):\n'
-          '          play                 [start [end]] (reproduce the channel)\n'
-          '          save     output.ts   [start [end]] (extract channel; omits teletext)\n'
-          '          compress output.mkv  [start [end]] (HQ vp9 encoding; with subtitles)\n'
-          '          compress output.webm [start [end]] (HQ vp9 encoding; omits subtitles)\n\n'
-          '      Notes: Optional <start> and <end> times (absolute, not from 0) in seconds\n'
-          '             Input and/or output files must be omitted when redirection is used\n')
+          '          play                [t0 [t1 [t2]]  (reproduce the channel)\n'
+          '          save     output.ts  [t0 [t1 [t2]]  (extract channel; omits teletext)\n'
+          '          compress output.mkv [t0 [t1 [t2]]  (HQ vp9 encoding; omits subtitles)\n\n'
+          '            t0: stream absolute start time in seconds (may be set to 0)\n'
+          '            t1: crop absolute start time (t1-t0 = relative start): 0 by default\n'
+          '            t2: crop absolute end time (t2-t1 = duration): stream end by default\n\n'
+          '      Note: Input and/or output files must be omitted when redirection is used\n')
     sys.exit(1)
 
 inFile = '-' if fromStdin else sys.argv[1]
+probesize = '10M'
 
 proc = subprocess.Popen(['ffprobe',
                          '-v', 'quiet',
+                         '-probesize', probesize,
                          '-of', 'compact',
                          '-show_programs',  # also reports streams (without subtitles lang if -show_streams isn't set)
                          '-show_streams',  # this duplicates streams listing when -show_programs is set
@@ -116,7 +119,6 @@ if channelName and channelName.isnumeric():
 
 videoPids = []
 audioPids = []
-audioStartTime = 0
 subtitlePids = []
 
 showStreams = not len(sys.argv) > varg + 1
@@ -158,8 +160,6 @@ else:
         elif isAudio:
             if pid:
                 audioPids.append(pid)
-            if 'start_time' in stream and audioStartTime == 0:
-                audioStartTime = float(stream['start_time'])
             if showStreams:
                 print('' if 'tag:language' not in stream else '(%s)' % stream['tag:language'],
                       '' if 'channel_layout' not in stream else stream['channel_layout'],
@@ -180,9 +180,9 @@ isSave = operation == 'save'
 isCompress = operation == 'compress'
 
 
-def seek(argc, opt, lg=None):
-    return [] if len(sys.argv) < argc + 1 else \
-           [opt, str(float(sys.argv[argc]) - (lg if lg else float(sys.argv[argc - 1])))]
+def seek(argc, opt):
+    return [] if len(sys.argv) <= argc else \
+           [opt, str(float(sys.argv[argc]) - float(sys.argv[argc - 1]))]
 
 if isPlay:
     cmd = ['ffplay']
@@ -190,8 +190,8 @@ if isPlay:
         cmd.extend(['-vst', 'i:' + videoPids[0]] if len(videoPids) > 0 else ['-vn', '-nodisp'])
         cmd.extend(['-ast', 'i:' + audioPids[0]] if len(audioPids) > 0 else ['-an'])
     cmd.append('-sn')
-    cmd.extend(seek(varg + 2, '-ss', audioStartTime))
-    cmd.extend(seek(varg + 3, '-t'))
+    cmd.extend(seek(varg + 3, '-ss'))
+    cmd.extend(seek(varg + 4, '-t'))
     cmd.append('-' if fromStdin else 'file:' + inFile)
 elif (isSave or isCompress):
     toStdout = len(sys.argv) < varg + 3
@@ -208,9 +208,10 @@ elif (isSave or isCompress):
             ext = '.mkv' if len(subtitlePids) > 0 else '.webm'
         varg += 1
     cmd = ['ffmpeg']
+    cmd.extend(['-probesize', probesize])
     cmd.extend(['-i', '-' if fromStdin else 'file:' + inFile])
-    cmd.extend(seek(varg + 2, '-ss', audioStartTime))
-    cmd.extend(seek(varg + 3, '-t'))
+    cmd.extend(seek(varg + 3, '-ss'))
+    cmd.extend(seek(varg + 4, '-t'))
     for pid in chain(videoPids, audioPids, subtitlePids):
         cmd.append('-map')
         cmd.append('i:' + pid)
