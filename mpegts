@@ -166,7 +166,7 @@ else:
                       '' if 'channels' not in stream else stream['channels'],
                       '' if 'bit_rate' not in stream else stream['bit_rate'])
         elif stream['codec_type'] == 'subtitle':
-            if pid and stream['codec_name'] == 'dvbsub':
+            if pid and 'dvbsub' in stream['codec_name'].replace( '_', ''):
                 subtitlePids.append(pid)
             if showStreams:
                 print('' if 'tag:language' not in stream else '(%s)' % stream['tag:language'])
