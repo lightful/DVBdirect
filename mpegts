@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-mpegts v1.3 - Copyright (C) 2016 Ciriaco Garcia de Celis
+mpegts v1.4 - Copyright (C) 2016 Ciriaco Garcia de Celis
 Utility to handle multiplexed MPEG-TS files captured from raw DVB sources
 """
 # This program is free software: you can redistribute it and/or modify
@@ -36,9 +36,12 @@ if len(sys.argv) < varg:
           '      channel (omit to list all channels):\n'
           '          "channel_name" or channel_ID\n\n'
           '      operation (omit to show the streams in the selected channel):\n'
-          '          play                [t0 [t1 [t2]]  (reproduce the channel)\n'
-          '          save     output.ts  [t0 [t1 [t2]]  (extract channel; omits teletext)\n'
-          '          compress output.mkv [t0 [t1 [t2]]  (HQ vp9 encoding; omits subtitles)\n\n'
+          '          play                 [t0 [t1 [t2]]  (reproduce the channel)\n'
+          '          save     output.ts   [t0 [t1 [t2]]  (extract channel; omits teletext)\n'
+          '          save_ns  output.ts   [t0 [t1 [t2]]  (also omits the subtitles)\n'
+          '          compress output.mkv  [t0 [t1 [t2]]  (HQ vp9 encoding; with subtitles)\n'
+          '          compress output.webm [t0 [t1 [t2]]  (HQ vp9 encoding; subtitles lost)\n'
+          '          compress output      [t0 [t1 [t2]]  (use .mkv if subtitles, or .webm)\n\n'
           '            t0: stream absolute start time in seconds (may be set to 0)\n'
           '            t1: crop absolute start time (t1-t0 = relative start): 0 by default\n'
           '            t2: crop absolute end time (t2-t1 = duration): stream end by default\n\n'
@@ -105,7 +108,7 @@ if channels and not channelName:
     for channel in sortedChannels.values():
         channelName = channel['tag:service_name']
         nameTellsProvider = re.match(channel['tag:service_provider'], channelName, re.IGNORECASE)
-        print('ID {0:>4} ({1:>2} streams) {2:{3}}{4}'.format(
+        print('ID {0:>5} ({1:>2} streams) {2:{3}}{4}'.format(
               channel['program_id'],
               channel['nb_streams'],
               channelName, longestChannel,
@@ -166,7 +169,7 @@ else:
                       '' if 'channels' not in stream else stream['channels'],
                       '' if 'bit_rate' not in stream else stream['bit_rate'])
         elif stream['codec_type'] == 'subtitle':
-            if pid and 'dvbsub' in stream['codec_name'].replace( '_', ''):
+            if pid and 'dvbsub' in stream['codec_name'].replace('_', ''):
                 subtitlePids.append(pid)
             if showStreams:
                 print('' if 'tag:language' not in stream else '(%s)' % stream['tag:language'])
@@ -176,8 +179,11 @@ if showStreams:
 
 operation = sys.argv[varg + 1].lower()
 isPlay = operation == 'play'
-isSave = operation == 'save'
+isSave = operation == 'save' or operation == 'save_ns'
 isCompress = operation == 'compress'
+
+if operation == 'save_ns':
+    subtitlePids = []
 
 
 def seek(argc, opt):
