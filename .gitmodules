@@ -1,0 +1,3 @@
+[submodule "syscpp"]
+	path = syscpp
+	url = https://github.com/lightful/syscpp.git

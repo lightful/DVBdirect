@@ -1,29 +1,44 @@
-## DVB direct: DVB easy handling tools for Linux
+## DVB direct handling tools for Linux
 
-Easily handle DVB captures from the command line, without thousands of parameters; in fact easier
-than using many desktop apps.
+Easily handle DVB captures from the command line. In fact easier than using many fancy desktop apps.
+You can watch a channel while recording it, or any other received in the same frequency.
 
-### 'mpegts' python script
+### 'mpegts' tool
 
-#### Capabilities
+* Determine the TV channels in any recorded MPEG-TS file
+* Show detailed information from any channel
+* Play, save or compress a separate program (including all audio tracks and dvb subtitles)
+* Actually it is a foolproof ffmpeg frontend to obviate the need for tens of parameters.
+It requires the *ffmpeg* package (which provides ffmpeg, ffprobe and ffplay) and python 3.4+ installed.
 
-* Easily determine the channels in a captured file
-* Show the channels information
-* Play, save or compress a separate program (including all audio channels and dvb subtitles)
+### 'dvbjet' standalone DVB capture utility
 
-#### Requirements
+* Tunes your TV card and saves the full plain MPEG stream for the selected frecuency, as with a radio.
 
-* python 3.4+
-* ffprobe, ffplay, ffmpeg
-* no technical skills
+* For example, the 60+ DVB-T channels in Madrid use only 9 frecuencies (482, 514, 570, 618, 698, 706, 746, 770 and 778 MHz).
+The frequency 770000000 carries *TVE1*, *TVE2*, *24H* and *Clan* TV channels (including standard and HD variants) plus a few radio stations:
 
-### Capturing
+ ```shell
+ $ dvbjet output.mts 3=770000000
+ ```
 
-A dedicated tool to properly capture the DVB signal is planned. Meanwhile, to get the MPEGTS files
-you may use e.g. dvbv5-zap, despite it needs configuration and it is a bit weird for this purpose
-(requires to select one specific channel even to record all of them):
+* The generated file (standard MPEG-TS format) can be processed by the **mpegts** tool.
+The frequencies used in your city can be found in configuration files (e.g. channels.conf) or running tools like *w_scan*.
 
-$ dvbv5-zap -P -r "a specific channel name" -o allchannels.mts
+* Besides the option number 3 shown here, all Linux DVB parameters are selectable by their standard ioctl system codes,
+instead of the multiple names used out there. Run *dvbjet* without options for more information.
+For example, outside Europe the option 5 may be required to setup the channel bandwidth.
 
-The generated file will record all the channels multiplexed in the same transponder. So you can
-record and/or watch several programs at a time.
+* There is an option to schedule the unattended starting/end recording time. Recording is reliable and no data is lost
+under high disk load; even a disk full may not cause  overrun errors (if space is freed soon enough).
+
+* There aren't build dependencies, it only requires a non-Methuselah C++ compiler (circa 2013: gcc 4.8+ or clang)
+and the system headers package (*linux-api-headers* in Arch, *kernel-headers* in Fedora, *linux-libc-dev*
+in Ubuntu or *linux-glibc-devel* in Suse):
+
+ ```shell
+ $ git clone --recursive https://github.com/lightful/DVBdirect
+ $ cd DVBdirect
+ $ make
+ ```
+ Please, do not forget the *--recursive* option to download a required submodule (otherwise the build would fail).
