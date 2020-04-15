@@ -42,3 +42,8 @@ in Ubuntu or *linux-glibc-devel* in Suse):
  $ make
  ```
  Please, do not forget the *--recursive* option to download a required submodule (otherwise the build would fail).
+ 
+ NOTE: if it says 
+     fatal error: stropts.h: No such file or directory 
+ do:
+     touch /usr/include/stropts.h
