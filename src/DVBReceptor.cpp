@@ -24,7 +24,7 @@
 #include <fcntl.h>
 #include <stropts.h>
 #include <unistd.h>
-
+#include <sys/ioctl.h>
 #include <algorithm>
 #include <cstring>
 #include <memory>
