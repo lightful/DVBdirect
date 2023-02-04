@@ -86,11 +86,12 @@ while True:
         if 'tag:service_name' in data:
             lastChannelName = data['tag:service_name'].lower()
             channels[lastChannelName] = data
-    elif nb_streams > 0:
-        nb_streams -= 1
-        channelStreams[lastChannelName].append(data['index'])
     elif 'index' in data:
-        streams[data['index']] = data
+        if nb_streams > 0:
+            nb_streams -= 1
+            channelStreams[lastChannelName].append(data['index'])
+        else:
+            streams[data['index']] = data
 
 proc.wait()
 if proc.returncode != 0:
